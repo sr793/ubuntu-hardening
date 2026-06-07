@@ -83,6 +83,9 @@ l'hardening vero e proprio.
 - **SSH**: non ridefinire `Subsystem sftp` (già nel default); `mkdir -p /run/sshd` prima di `sshd -t`.
 - **Email (full / MTA)**: mittente riscritto a `noreply@FQDN` via `header_checks` +
   `sender_canonical`; `update-fqdn.service` riallinea hostname/Postfix al boot (utile dopo clone).
+- **Identità mail nel light**: nullmailer scrive mittente/Message-ID/HELO da `/etc/mailname` +
+  `me`/`defaulthost`/`defaultdomain`. Dopo cambio hostname/clone restano col nome vecchio →
+  `update-nullmailer-fqdn.sh` + `update-nullmailer-fqdn.service` li riallineano al boot.
 - **Light non-interattivo**: i `sudo` interni girano senza tty → per l'automazione usare
   `SUDO_ASKPASS` (vedi `agents/README.md`), non il solo `sudo -S -v`.
 

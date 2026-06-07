@@ -306,22 +306,58 @@ else
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nullmailer
     sudo DEBIAN_FRONTEND=noninteractive apt-get install -y bsd-mailx
 
-    FQDN=$(hostname -f 2>/dev/null || hostname)
-    DOMAIN=$(hostname -d 2>/dev/null || true)
-
     log_info "Configurazione nullmailer (relay: $RELAY_HOST)..."
+    # Config statica (non dipende dall'hostname)
     echo "$RELAY_HOST smtp --port=25" | sudo tee /etc/nullmailer/remotes >/dev/null
     sudo chmod 600 /etc/nullmailer/remotes
     # Inoltra tutta la posta locale (root/utenti) all'indirizzo admin
     echo "$ADMIN_EMAIL" | sudo tee /etc/nullmailer/adminaddr >/dev/null
-    echo "$FQDN" | sudo tee /etc/mailname >/dev/null
-    if [[ -n "$DOMAIN" ]]; then
-        echo "$DOMAIN" | sudo tee /etc/nullmailer/defaultdomain >/dev/null
-    fi
 
+    # Script che riallinea l'identità mail (mittente/Message-ID/HELO) all'FQDN corrente.
+    # Serve perché dopo un cambio hostname / clone i file restano col nome vecchio
+    # (es. From: root@<host-vecchio> mentre il Subject mostra quello nuovo).
+    sudo tee /usr/local/bin/update-nullmailer-fqdn.sh > /dev/null <<'NM_FQDN_EOF'
+#!/bin/bash
+# Riallinea l'identità di nullmailer all'FQDN corrente
+if ! dpkg -s nullmailer >/dev/null 2>&1; then
+    logger -t update-nullmailer-fqdn "nullmailer non installato, skip"
+    exit 0
+fi
+FQDN=$(hostname -f 2>/dev/null || hostname)
+DOMAIN=$(hostname -d 2>/dev/null)
+echo "$FQDN" > /etc/mailname
+echo "$FQDN" > /etc/nullmailer/me
+echo "$FQDN" > /etc/nullmailer/defaulthost
+[ -n "$DOMAIN" ] && echo "$DOMAIN" > /etc/nullmailer/defaultdomain
+systemctl restart nullmailer 2>/dev/null || true
+logger -t update-nullmailer-fqdn "identita nullmailer -> ${FQDN}"
+echo "nullmailer identity: ${FQDN}"
+NM_FQDN_EOF
+    sudo chmod +x /usr/local/bin/update-nullmailer-fqdn.sh
+
+    # Servizio systemd: riallinea l'identità al boot (gestisce clone / cambio hostname)
+    sudo tee /etc/systemd/system/update-nullmailer-fqdn.service > /dev/null <<'NM_SVC_EOF'
+[Unit]
+Description=Update nullmailer identity (mailname/me/defaulthost) from current FQDN
+After=network-online.target nullmailer.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/update-nullmailer-fqdn.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+NM_SVC_EOF
+    sudo systemctl daemon-reload
+    sudo systemctl enable update-nullmailer-fqdn.service
+
+    # Applica subito l'identità corrente e (ri)avvia nullmailer
+    sudo /usr/local/bin/update-nullmailer-fqdn.sh
     sudo systemctl enable nullmailer
     sudo systemctl restart nullmailer
-    log_info "✓ nullmailer configurato verso $RELAY_HOST (admin: $ADMIN_EMAIL)"
+    log_info "✓ nullmailer verso $RELAY_HOST (admin: $ADMIN_EMAIL); identità auto-allineata al boot"
 fi
 echo ""
 
