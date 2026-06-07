@@ -329,7 +329,8 @@ echo "$FQDN" > /etc/mailname
 echo "$FQDN" > /etc/nullmailer/me
 echo "$FQDN" > /etc/nullmailer/defaulthost
 [ -n "$DOMAIN" ] && echo "$DOMAIN" > /etc/nullmailer/defaultdomain
-systemctl restart nullmailer 2>/dev/null || true
+# try-restart: riavvia solo se già attivo (al boot gira PRIMA di nullmailer → no-op)
+systemctl try-restart nullmailer 2>/dev/null || true
 logger -t update-nullmailer-fqdn "identita nullmailer -> ${FQDN}"
 echo "nullmailer identity: ${FQDN}"
 NM_FQDN_EOF
@@ -339,8 +340,11 @@ NM_FQDN_EOF
     sudo tee /etc/systemd/system/update-nullmailer-fqdn.service > /dev/null <<'NM_SVC_EOF'
 [Unit]
 Description=Update nullmailer identity (mailname/me/defaulthost) from current FQDN
-After=network-online.target nullmailer.service
+After=network-online.target
 Wants=network-online.target
+# DEVE girare PRIMA di nullmailer e fail2ban: l'identità va corretta prima che
+# vengano inviate notifiche (es. la mail "sshd started" di fail2ban al boot).
+Before=nullmailer.service fail2ban.service
 
 [Service]
 Type=oneshot
